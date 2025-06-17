@@ -2,7 +2,8 @@ import csv
 import heapq
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import List, Tuple, Optional
+import random
+from typing import List, Tuple, Optional, Dict
 
 class Node:
     def __init__(self, position: Tuple[int, int], g_cost: float = 0, h_cost: float = 0, parent=None):
@@ -20,6 +21,7 @@ class CarPathfinder:
         self.grid = self.load_grid(grid_file)
         self.rows = len(self.grid)
         self.cols = len(self.grid[0])
+        self.wall_proximity_weights = self._calculate_wall_proximity_weights()
         
     def load_grid(self, filename: str) -> List[List[int]]:
         grid = []
@@ -29,31 +31,75 @@ class CarPathfinder:
                 grid.append([int(cell) for cell in row])
         return grid
     
-    def visualize_grid(self, path: Optional[List[Tuple[int, int]]] = None, start: Optional[Tuple[int, int]] = None, end: Optional[Tuple[int, int]] = None):
+    def _calculate_wall_proximity_weights(self) -> Dict[Tuple[int, int], float]:
+        weights = {}
+        for row in range(self.rows):
+            for col in range(self.cols):
+                if self.grid[row][col] == 0:
+                    min_distance = self._min_distance_to_wall((row, col))
+                    if min_distance <= 2:
+                        weight = 3.0 - min_distance * 0.5
+                        weights[(row, col)] = weight
+                    else:
+                        weights[(row, col)] = 1.0
+        return weights
+    
+    def _min_distance_to_wall(self, position: Tuple[int, int]) -> int:
+        row, col = position
+        min_dist = float('inf')
+        
+        for r in range(max(0, row-2), min(self.rows, row+3)):
+            for c in range(max(0, col-2), min(self.cols, col+3)):
+                if self.grid[r][c] == 1:
+                    distance = max(abs(r - row), abs(c - col))
+                    min_dist = min(min_dist, distance)
+        
+        return min_dist if min_dist != float('inf') else 3
+    
+    def visualize_grid(self, path: Optional[List[Tuple[int, int]]] = None, start: Optional[Tuple[int, int]] = None, end: Optional[Tuple[int, int]] = None, waypoints: Optional[List[Tuple[int, int]]] = None, path_segments: Optional[Dict[str, List[Tuple[int, int]]]] = None, segment_colors: Optional[Dict[str, str]] = None):
         fig, ax = plt.subplots(figsize=(15, 10))
         
         grid_array = np.array(self.grid)
         display_grid = grid_array.copy().astype(float)
         
-        if path:
+        if path_segments and segment_colors:
+            color_map = plt.cm.get_cmap('tab10')
+            for i, (segment_name, segment_path) in enumerate(path_segments.items()):
+                for pos in segment_path:
+                    if pos != start and pos != end and (not waypoints or pos not in waypoints):
+                        display_grid[pos[0], pos[1]] = 0.3 + (i * 0.1) % 0.4
+        elif path:
             for pos in path:
-                if pos != start and pos != end:
+                if pos != start and pos != end and (not waypoints or pos not in waypoints):
                     display_grid[pos[0], pos[1]] = 0.5
+        
+        if waypoints:
+            for waypoint in waypoints:
+                display_grid[waypoint[0], waypoint[1]] = 0.9
         
         if start:
             display_grid[start[0], start[1]] = 0.3
         if end:
             display_grid[end[0], end[1]] = 0.7
         
-        colors = ['white', 'black', 'green', 'blue', 'red']
-        bounds = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
-        
         im = ax.imshow(display_grid, cmap='RdYlGn_r', vmin=0, vmax=1)
         
-        ax.set_title('Car Navigation Grid\nWhite=Free, Black=Obstacle, Green=Start, Blue=Path, Red=End')
+        title = 'Car Navigation Grid\nWhite=Free, Black=Obstacle, Green=Start, Red=End'
+        if waypoints:
+            title += ', Purple=Waypoints'
+        if path_segments and segment_colors:
+            title += '\nPath Segments: '
+            for segment_name, color in segment_colors.items():
+                title += f'{segment_name}({color}) '
+        ax.set_title(title)
         ax.grid(True, alpha=0.3)
         ax.set_xlabel('X Coordinate')
         ax.set_ylabel('Y Coordinate')
+        
+        if path_segments and segment_colors:
+            print("\n=== PATH SEGMENT COLORS ===")
+            for segment_name, color in segment_colors.items():
+                print(f"{segment_name}: {color}")
         
         plt.colorbar(im, ax=ax)
         plt.tight_layout()
@@ -108,7 +154,8 @@ class CarPathfinder:
                 if neighbor in closed_set:
                     continue
                 
-                tentative_g = g_score[current_pos] + 1
+                move_cost = self.wall_proximity_weights.get(neighbor, 1.0)
+                tentative_g = g_score[current_pos] + move_cost
                 
                 if neighbor not in g_score or tentative_g < g_score[neighbor]:
                     came_from[neighbor] = current_pos
@@ -119,6 +166,46 @@ class CarPathfinder:
                     heapq.heappush(open_list, neighbor_node)
         
         return None
+    
+    def pathfind_with_waypoints(self, start: Tuple[int, int], waypoints: List[Tuple[int, int]], end: Tuple[int, int]) -> Tuple[Optional[List[Tuple[int, int]]], Dict[str, List[Tuple[int, int]]], Dict[str, str]]:
+        colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
+        
+        complete_path = []
+        path_segments = {}
+        segment_colors = {}
+        
+        current_start = start
+        points = waypoints + [end]
+        
+        for i, target in enumerate(points):
+            if any(self.grid[pos[0]][pos[1]] == 1 for pos in [current_start, target]):
+                print(f"Error: Position {current_start} or {target} is blocked!")
+                return None, {}, {}
+            
+            segment_path = self.astar_pathfind(current_start, target)
+            if segment_path is None:
+                print(f"No path found from {current_start} to {target}")
+                return None, {}, {}
+            
+            if i == len(points) - 1:
+                segment_name = f"Segment {i+1}: Waypoint {i} -> End"
+            else:
+                segment_name = f"Segment {i+1}: {'Start' if i == 0 else f'Waypoint {i}'} -> Waypoint {i+1}"
+            
+            color = random.choice(colors)
+            colors.remove(color) if color in colors else None
+            
+            path_segments[segment_name] = segment_path
+            segment_colors[segment_name] = color
+            
+            if complete_path:
+                complete_path.extend(segment_path[1:])
+            else:
+                complete_path.extend(segment_path)
+            
+            current_start = target
+        
+        return complete_path, path_segments, segment_colors
     
     def get_directions(self, path: List[Tuple[int, int]]) -> List[str]:
         if len(path) < 2:
@@ -182,6 +269,34 @@ class CarPathfinder:
         
         return start, end
     
+    def get_waypoints_input(self) -> List[Tuple[int, int]]:
+        waypoints = []
+        print("\nEnter waypoints (optional). Press Enter without input to finish.")
+        
+        while True:
+            try:
+                waypoint_input = input(f"Enter waypoint {len(waypoints)+1} (row,col) or press Enter to finish: ").strip()
+                if not waypoint_input:
+                    break
+                
+                waypoint_row, waypoint_col = map(int, waypoint_input.split(','))
+                waypoint = (waypoint_row, waypoint_col)
+                
+                if not (0 <= waypoint_row < self.rows and 0 <= waypoint_col < self.cols):
+                    print("Waypoint position out of bounds!")
+                    continue
+                if self.grid[waypoint_row][waypoint_col] == 1:
+                    print("Waypoint position is blocked!")
+                    continue
+                
+                waypoints.append(waypoint)
+                print(f"Waypoint {len(waypoints)} added: {waypoint}")
+                
+            except ValueError:
+                print("Invalid input! Please enter as: row,col (e.g., 30,40)")
+        
+        return waypoints
+    
     def navigate_car(self):
         print("=== Autonomous Car Navigation System ===")
         print("Loading grid map...")
@@ -189,27 +304,60 @@ class CarPathfinder:
         self.visualize_grid()
         
         start, end = self.get_user_input()
+        waypoints = self.get_waypoints_input()
         
-        print(f"\nFinding path from {start} to {end}...")
-        path = self.astar_pathfind(start, end)
-        
-        if path is None:
-            print("No path found! The destination is unreachable.")
-            return
-        
-        directions = self.get_directions(path)
-        
-        print(f"\nPath found! Length: {len(path)} steps")
-        print("\n=== NAVIGATION INSTRUCTIONS ===")
-        for i, direction in enumerate(directions, 1):
-            print(f"Step {i}: {direction}")
-        
-        print(f"\n=== PATH COORDINATES ===")
-        for i, pos in enumerate(path):
-            print(f"Step {i}: {pos}")
-        
-        print("\n=== VISUALIZATION ===")
-        self.visualize_grid(path, start, end)
+        if waypoints:
+            print(f"\nFinding path from {start} through waypoints {waypoints} to {end}...")
+            path, path_segments, segment_colors = self.pathfind_with_waypoints(start, waypoints, end)
+            
+            if path is None:
+                print("No path found! One or more segments are unreachable.")
+                return
+            
+            directions = self.get_directions(path)
+            
+            print(f"\nPath found! Total length: {len(path)} steps")
+            print(f"Number of segments: {len(path_segments)}")
+            
+            print("\n=== SEGMENT BREAKDOWN ===")
+            for segment_name, segment_path in path_segments.items():
+                segment_directions = self.get_directions(segment_path)
+                print(f"\n{segment_name} ({segment_colors[segment_name]}):")
+                print(f"  Length: {len(segment_path)} steps")
+                print(f"  Directions: {segment_directions}")
+            
+            print(f"\n=== COMPLETE NAVIGATION INSTRUCTIONS ===")
+            for i, direction in enumerate(directions, 1):
+                print(f"Step {i}: {direction}")
+            
+            print(f"\n=== PATH COORDINATES ===")
+            for i, pos in enumerate(path):
+                print(f"Step {i}: {pos}")
+            
+            print("\n=== VISUALIZATION ===")
+            self.visualize_grid(path, start, end, waypoints, path_segments, segment_colors)
+            
+        else:
+            print(f"\nFinding path from {start} to {end}...")
+            path = self.astar_pathfind(start, end)
+            
+            if path is None:
+                print("No path found! The destination is unreachable.")
+                return
+            
+            directions = self.get_directions(path)
+            
+            print(f"\nPath found! Length: {len(path)} steps")
+            print("\n=== NAVIGATION INSTRUCTIONS ===")
+            for i, direction in enumerate(directions, 1):
+                print(f"Step {i}: {direction}")
+            
+            print(f"\n=== PATH COORDINATES ===")
+            for i, pos in enumerate(path):
+                print(f"Step {i}: {pos}")
+            
+            print("\n=== VISUALIZATION ===")
+            self.visualize_grid(path, start, end)
         
         return path, directions
 

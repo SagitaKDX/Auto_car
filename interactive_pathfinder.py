@@ -3,8 +3,9 @@ from tkinter import ttk, messagebox, filedialog
 import csv
 import time
 import threading
+import random
 from pathfinding_car import CarPathfinder
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 
 class InteractivePathfinder:
     def __init__(self, grid_file: str = 'floor2.csv'):
@@ -24,7 +25,10 @@ class InteractivePathfinder:
         
         self.start_pos = None
         self.end_pos = None
+        self.waypoints = []
         self.current_path = None
+        self.path_segments = {}
+        self.segment_colors = {}
         self.mode = "obstacle"
         self.is_dragging = False
         self.last_pos = None
@@ -40,7 +44,8 @@ class InteractivePathfinder:
         self.stats = {
             'paths_found': 0,
             'total_steps': 0,
-            'obstacles_modified': 0
+            'obstacles_modified': 0,
+            'waypoints_used': 0
         }
         
         self.setup_ui()
@@ -57,20 +62,24 @@ class InteractivePathfinder:
             'obstacle': '#2c3e50',
             'start': '#2ecc71',
             'end': '#e74c3c',
+            'waypoint': '#9b59b6',
             'path': '#3498db',
             'path_animated': '#f39c12',
             'grid_line': '#bdc3c7',
-            'hover': '#95a5a6'
+            'hover': '#95a5a6',
+            'segment_colors': ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#e67e22', '#1abc9c', '#34495e', '#f1c40f', '#e91e63']
         }
         
     def setup_keyboard_shortcuts(self):
         self.root.bind('<Key-1>', lambda e: self.set_mode('obstacle'))
         self.root.bind('<Key-2>', lambda e: self.set_mode('start'))
         self.root.bind('<Key-3>', lambda e: self.set_mode('end'))
+        self.root.bind('<Key-4>', lambda e: self.set_mode('waypoint'))
         self.root.bind('<Control-f>', lambda e: self.find_path())
         self.root.bind('<Control-r>', lambda e: self.reset_grid())
         self.root.bind('<Control-s>', lambda e: self.save_grid())
         self.root.bind('<Control-o>', lambda e: self.load_grid())
+        self.root.bind('<Control-w>', lambda e: self.clear_waypoints())
         self.root.bind('<plus>', lambda e: self.zoom_in())
         self.root.bind('<minus>', lambda e: self.zoom_out())
         self.root.focus_set()
@@ -86,7 +95,7 @@ class InteractivePathfinder:
         title_frame = ttk.Frame(main_frame)
         title_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 15))
         
-        ttk.Label(title_frame, text="🚗 Interactive Car Pathfinder", 
+        ttk.Label(title_frame, text="🚗 Interactive Car Pathfinder - Enhanced", 
                  style='Title.TLabel').pack(side=tk.LEFT)
         
         status_frame = ttk.Frame(title_frame)
@@ -109,7 +118,8 @@ class InteractivePathfinder:
         modes = [
             ("🔧 Edit Obstacles (1)", "obstacle"),
             ("🟢 Set Start (2)", "start"),
-            ("🔴 Set End (3)", "end")
+            ("🔴 Set End (3)", "end"),
+            ("🟣 Add Waypoints (4)", "waypoint")
         ]
         
         for text, value in modes:
@@ -130,6 +140,9 @@ class InteractivePathfinder:
         
         ttk.Button(action_frame, text="🧹 Clear Path", 
                   command=self.clear_path, **button_config).pack(pady=2, fill=tk.X)
+        
+        ttk.Button(action_frame, text="🚩 Clear Waypoints", 
+                  command=self.clear_waypoints, **button_config).pack(pady=2, fill=tk.X)
         
         ttk.Button(action_frame, text="🔄 Reset Grid", 
                   command=self.reset_grid, **button_config).pack(pady=2, fill=tk.X)
@@ -206,10 +219,24 @@ class InteractivePathfinder:
         right_panel = ttk.Frame(content_frame)
         right_panel.pack(side=tk.RIGHT, fill=tk.Y)
         
+        waypoint_frame = ttk.LabelFrame(right_panel, text="🚩 Waypoints", padding=10)
+        waypoint_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.waypoint_listbox = tk.Listbox(waypoint_frame, height=4, font=("Consolas", 9))
+        self.waypoint_listbox.pack(fill=tk.X, pady=(0, 5))
+        
+        waypoint_btn_frame = ttk.Frame(waypoint_frame)
+        waypoint_btn_frame.pack(fill=tk.X)
+        
+        ttk.Button(waypoint_btn_frame, text="Remove", 
+                  command=self.remove_selected_waypoint, width=8).pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Button(waypoint_btn_frame, text="Clear All", 
+                  command=self.clear_waypoints, width=8).pack(side=tk.LEFT)
+        
         directions_frame = ttk.LabelFrame(right_panel, text="📋 Navigation Instructions", padding=10)
         directions_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
-        self.directions_text = tk.Text(directions_frame, width=30, height=20, 
+        self.directions_text = tk.Text(directions_frame, width=30, height=15, 
                                       font=("Consolas", 9), state=tk.DISABLED,
                                       bg='#f8f9fa', fg='#2c3e50')
         
@@ -222,7 +249,7 @@ class InteractivePathfinder:
         stats_frame.pack(fill=tk.X, pady=(0, 10))
         
         self.stats_labels = {}
-        for key in ['paths_found', 'total_steps', 'obstacles_modified']:
+        for key in ['paths_found', 'total_steps', 'obstacles_modified', 'waypoints_used']:
             label = ttk.Label(stats_frame, text="", style='Stats.TLabel')
             label.pack(anchor=tk.W, pady=2)
             self.stats_labels[key] = label
@@ -237,7 +264,8 @@ class InteractivePathfinder:
             ("⬛ Obstacle", self.colors['obstacle']), 
             ("🟢 Start point", self.colors['start']),
             ("🔴 End point", self.colors['end']),
-            ("🟦 Path", self.colors['path'])
+            ("🟣 Waypoint", self.colors['waypoint']),
+            ("🟦 Path segments", self.colors['path'])
         ]
         
         for text, color in legend_items:
@@ -253,8 +281,9 @@ class InteractivePathfinder:
         shortcuts_frame.pack(fill=tk.X, pady=(10, 0))
         
         shortcuts = [
-            "1/2/3: Change mode",
+            "1/2/3/4: Change mode",
             "Ctrl+F: Find path",
+            "Ctrl+W: Clear waypoints",
             "Ctrl+R: Reset grid", 
             "+/-: Zoom in/out"
         ]
@@ -272,6 +301,29 @@ class InteractivePathfinder:
         self.stats_labels['paths_found'].config(text=f"Paths Found: {self.stats['paths_found']}")
         self.stats_labels['total_steps'].config(text=f"Total Steps: {self.stats['total_steps']}")
         self.stats_labels['obstacles_modified'].config(text=f"Obstacles Modified: {self.stats['obstacles_modified']}")
+        self.stats_labels['waypoints_used'].config(text=f"Waypoints Used: {self.stats['waypoints_used']}")
+        
+    def update_waypoint_list(self):
+        self.waypoint_listbox.delete(0, tk.END)
+        for i, waypoint in enumerate(self.waypoints):
+            self.waypoint_listbox.insert(tk.END, f"{i+1}. {waypoint}")
+        
+    def remove_selected_waypoint(self):
+        selection = self.waypoint_listbox.curselection()
+        if selection:
+            index = selection[0]
+            removed_waypoint = self.waypoints.pop(index)
+            self.update_waypoint_list()
+            self.clear_path()
+            self.draw_grid()
+            self.update_status(f"Waypoint {removed_waypoint} removed", 'blue')
+        
+    def clear_waypoints(self):
+        self.waypoints.clear()
+        self.update_waypoint_list()
+        self.clear_path()
+        self.draw_grid()
+        self.update_status("All waypoints cleared", 'blue')
         
     def zoom_in(self):
         if self.zoom_level < 3.0:
@@ -297,7 +349,8 @@ class InteractivePathfinder:
         mode_text = {
             "obstacle": "🔧 Click/drag to toggle obstacles (Black = blocked, White = free)",
             "start": "🟢 Click to set start position",
-            "end": "🔴 Click to set end position"
+            "end": "🔴 Click to set end position",
+            "waypoint": "🟣 Click to add waypoints (intermediate stops)"
         }
         self.info_label.config(text=mode_text.get(self.mode, ""))
         
@@ -305,7 +358,8 @@ class InteractivePathfinder:
         col = event.x // self.cell_size
         row = event.y // self.cell_size
         if 0 <= row < self.rows and 0 <= col < self.cols:
-            self.coords_label.config(text=f"Position: ({row}, {col})")
+            weight = self.pathfinder.wall_proximity_weights.get((row, col), 1.0)
+            self.coords_label.config(text=f"Position: ({row}, {col}) Weight: {weight:.1f}")
         
     def on_mouse_leave(self, event):
         self.coords_label.config(text="")
@@ -333,6 +387,7 @@ class InteractivePathfinder:
             if self.last_pos != (row, col):
                 self.grid[row][col] = 1 - self.grid[row][col]
                 self.pathfinder.grid = self.grid
+                self.pathfinder.wall_proximity_weights = self.pathfinder._calculate_wall_proximity_weights()
                 self.stats['obstacles_modified'] += 1
                 self.update_stats_display()
                 self.last_pos = (row, col)
@@ -350,6 +405,17 @@ class InteractivePathfinder:
                 return
             self.end_pos = (row, col)
             self.update_status("End position set", 'green')
+            
+        elif self.mode == "waypoint":
+            if self.grid[row][col] == 1:
+                messagebox.showwarning("Invalid Position", "Cannot set waypoint on obstacle!")
+                return
+            if (row, col) not in self.waypoints:
+                self.waypoints.append((row, col))
+                self.update_waypoint_list()
+                self.update_status(f"Waypoint added: {(row, col)}", 'green')
+            else:
+                messagebox.showinfo("Duplicate", "Waypoint already exists at this position!")
             
         self.clear_path()
         self.draw_grid()
@@ -372,14 +438,23 @@ class InteractivePathfinder:
                 if self.grid[row][col] == 1:
                     color = self.colors['obstacle']
                 
-                if self.current_path and (row, col) in self.current_path:
-                    if (row, col) != self.start_pos and (row, col) != self.end_pos:
+                if self.path_segments:
+                    for segment_name, segment_path in self.path_segments.items():
+                        if (row, col) in segment_path:
+                            if (row, col) not in [self.start_pos, self.end_pos] and (row, col) not in self.waypoints:
+                                segment_color = self.segment_colors.get(segment_name, self.colors['path'])
+                                color = segment_color
+                                break
+                elif self.current_path and (row, col) in self.current_path:
+                    if (row, col) != self.start_pos and (row, col) != self.end_pos and (row, col) not in self.waypoints:
                         color = self.colors['path']
                 
                 if self.start_pos == (row, col):
                     color = self.colors['start']
                 elif self.end_pos == (row, col):
                     color = self.colors['end']
+                elif (row, col) in self.waypoints:
+                    color = self.colors['waypoint']
                 
                 self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, 
                                            outline=self.colors['grid_line'], width=1)
@@ -400,17 +475,90 @@ class InteractivePathfinder:
         
         def pathfind_thread():
             self.pathfinder.grid = self.grid
-            path = self.pathfinder.astar_pathfind(self.start_pos, self.end_pos)
+            self.pathfinder.wall_proximity_weights = self.pathfinder._calculate_wall_proximity_weights()
             
-            self.root.after(0, lambda: self.handle_path_result(path))
+            if self.waypoints:
+                path, segments, colors = self.pathfinder.pathfind_with_waypoints(
+                    self.start_pos, self.waypoints, self.end_pos)
+                self.root.after(0, lambda: self.handle_waypoint_path_result(path, segments, colors))
+            else:
+                path = self.pathfinder.astar_pathfind(self.start_pos, self.end_pos)
+                self.root.after(0, lambda: self.handle_path_result(path))
             
         threading.Thread(target=pathfind_thread, daemon=True).start()
+        
+    def handle_waypoint_path_result(self, path, segments, colors):
+        self.find_path_btn.config(state='normal', text="🔍 Find Path")
+        
+        if path:
+            self.current_path = path
+            self.path_segments = segments
+            self.segment_colors = colors
+            self.stats['paths_found'] += 1
+            self.stats['total_steps'] += len(path)
+            self.stats['waypoints_used'] = len(self.waypoints)
+            self.update_stats_display()
+            
+            self.directions_text.config(state=tk.NORMAL)
+            self.directions_text.delete(1.0, tk.END)
+            
+            header = f"🎯 WAYPOINT PATH FOUND!\n{'='*30}\n"
+            self.directions_text.insert(tk.END, header)
+            self.directions_text.insert(tk.END, f"📏 Total Length: {len(path)} steps\n")
+            self.directions_text.insert(tk.END, f"🚩 Waypoints: {len(self.waypoints)}\n")
+            self.directions_text.insert(tk.END, f"📊 Segments: {len(segments)}\n\n")
+            
+            self.directions_text.insert(tk.END, "🎨 SEGMENT COLORS:\n")
+            self.directions_text.insert(tk.END, "-" * 20 + "\n")
+            for segment_name, color in colors.items():
+                self.directions_text.insert(tk.END, f"● {segment_name}: {color}\n")
+            
+            self.directions_text.insert(tk.END, "\n📋 SEGMENT BREAKDOWN:\n")
+            self.directions_text.insert(tk.END, "=" * 25 + "\n")
+            
+            for segment_name, segment_path in segments.items():
+                segment_directions = self.pathfinder.get_directions(segment_path)
+                color = colors[segment_name]
+                self.directions_text.insert(tk.END, f"\n🔷 {segment_name} ({color}):\n")
+                self.directions_text.insert(tk.END, f"   Length: {len(segment_path)} steps\n")
+                self.directions_text.insert(tk.END, f"   From: {segment_path[0]} To: {segment_path[-1]}\n")
+                
+                if len(segment_directions) <= 10:
+                    self.directions_text.insert(tk.END, f"   Directions: {segment_directions}\n")
+                else:
+                    self.directions_text.insert(tk.END, f"   First 10: {segment_directions[:10]}...\n")
+            
+            complete_directions = self.pathfinder.get_directions(path)
+            self.directions_text.insert(tk.END, f"\n🧭 COMPLETE NAVIGATION:\n")
+            self.directions_text.insert(tk.END, "-" * 25 + "\n")
+            
+            direction_icons = {
+                "UP": "⬆️", "DOWN": "⬇️", 
+                "LEFT": "⬅️", "RIGHT": "➡️"
+            }
+            
+            for i, direction in enumerate(complete_directions[:20], 1):
+                icon = direction_icons.get(direction, "❓")
+                self.directions_text.insert(tk.END, f"{i:2d}. {icon} {direction}\n")
+            
+            if len(complete_directions) > 20:
+                self.directions_text.insert(tk.END, f"... and {len(complete_directions)-20} more steps\n")
+                
+            self.directions_text.config(state=tk.DISABLED)
+            
+            self.draw_grid()
+            self.update_status(f"Waypoint path found! {len(path)} steps", 'green')
+        else:
+            messagebox.showerror("No Path", "❌ No path found! One or more segments are unreachable.")
+            self.update_status("No path found", 'red')
         
     def handle_path_result(self, path):
         self.find_path_btn.config(state='normal', text="🔍 Find Path")
         
         if path:
             self.current_path = path
+            self.path_segments = {}
+            self.segment_colors = {}
             self.stats['paths_found'] += 1
             self.stats['total_steps'] += len(path)
             self.update_stats_display()
@@ -426,6 +574,10 @@ class InteractivePathfinder:
             self.directions_text.insert(tk.END, f"⏱️ From: {self.start_pos}\n")
             self.directions_text.insert(tk.END, f"🏁 To: {self.end_pos}\n\n")
             
+            total_cost = sum(self.pathfinder.wall_proximity_weights.get(pos, 1.0) for pos in path)
+            avg_cost = total_cost / len(path)
+            self.directions_text.insert(tk.END, f"🛡️ Safety Cost: {total_cost:.1f} (avg: {avg_cost:.2f})\n\n")
+            
             self.directions_text.insert(tk.END, "🧭 NAVIGATION:\n")
             self.directions_text.insert(tk.END, "-" * 20 + "\n")
             
@@ -440,8 +592,12 @@ class InteractivePathfinder:
                 
             self.directions_text.insert(tk.END, f"\n📍 COORDINATES:\n")
             self.directions_text.insert(tk.END, "-" * 15 + "\n")
-            for i, pos in enumerate(path):
-                self.directions_text.insert(tk.END, f"{i:2d}. {pos}\n")
+            for i, pos in enumerate(path[:15]):
+                weight = self.pathfinder.wall_proximity_weights.get(pos, 1.0)
+                self.directions_text.insert(tk.END, f"{i:2d}. {pos} (w:{weight:.1f})\n")
+            
+            if len(path) > 15:
+                self.directions_text.insert(tk.END, f"... and {len(path)-15} more positions\n")
                 
             self.directions_text.config(state=tk.DISABLED)
             
@@ -461,7 +617,7 @@ class InteractivePathfinder:
                 return
                 
             pos = path[step]
-            if pos != self.start_pos and pos != self.end_pos:
+            if pos != self.start_pos and pos != self.end_pos and pos not in self.waypoints:
                 row, col = pos
                 x1 = col * self.cell_size
                 y1 = row * self.cell_size
@@ -481,6 +637,8 @@ class InteractivePathfinder:
         
     def clear_path(self):
         self.current_path = None
+        self.path_segments = {}
+        self.segment_colors = {}
         self.path_animation_running = False
         self.directions_text.config(state=tk.NORMAL)
         self.directions_text.delete(1.0, tk.END)
@@ -494,6 +652,8 @@ class InteractivePathfinder:
             self.grid = self.pathfinder.grid
             self.start_pos = None
             self.end_pos = None
+            self.waypoints.clear()
+            self.update_waypoint_list()
             self.clear_path()
             self.update_status("Grid reset", 'blue')
         except Exception as e:
@@ -512,6 +672,8 @@ class InteractivePathfinder:
                 self.cols = len(self.grid[0])
                 self.start_pos = None
                 self.end_pos = None
+                self.waypoints.clear()
+                self.update_waypoint_list()
                 self.clear_path()
                 self.draw_grid()
                 self.update_status("Grid loaded successfully", 'green')
@@ -547,22 +709,34 @@ class InteractivePathfinder:
         if filename:
             try:
                 with open(filename, 'w') as file:
-                    file.write("Car Navigation Path Export\n")
-                    file.write("=" * 30 + "\n\n")
+                    file.write("Enhanced Car Navigation Path Export\n")
+                    file.write("=" * 35 + "\n\n")
                     file.write(f"Start Position: {self.start_pos}\n")
                     file.write(f"End Position: {self.end_pos}\n")
+                    file.write(f"Waypoints: {self.waypoints}\n")
                     file.write(f"Path Length: {len(self.current_path)} steps\n\n")
                     
+                    if self.waypoints:
+                        file.write("Waypoint Navigation:\n")
+                        file.write("-" * 20 + "\n")
+                        for segment_name, segment_path in self.path_segments.items():
+                            color = self.segment_colors[segment_name]
+                            directions = self.pathfinder.get_directions(segment_path)
+                            file.write(f"\n{segment_name} ({color}):\n")
+                            file.write(f"  Length: {len(segment_path)} steps\n")
+                            file.write(f"  Directions: {directions}\n")
+                    
                     directions = self.pathfinder.get_directions(self.current_path)
-                    file.write("Navigation Instructions:\n")
-                    file.write("-" * 25 + "\n")
+                    file.write(f"\nComplete Navigation Instructions:\n")
+                    file.write("-" * 30 + "\n")
                     for i, direction in enumerate(directions, 1):
                         file.write(f"Step {i}: {direction}\n")
                         
-                    file.write(f"\nPath Coordinates:\n")
-                    file.write("-" * 20 + "\n")
+                    file.write(f"\nPath Coordinates with Weights:\n")
+                    file.write("-" * 30 + "\n")
                     for i, pos in enumerate(self.current_path):
-                        file.write(f"Step {i}: {pos}\n")
+                        weight = self.pathfinder.wall_proximity_weights.get(pos, 1.0)
+                        file.write(f"Step {i}: {pos} (weight: {weight:.2f})\n")
                         
                 self.update_status("Path exported successfully", 'green')
             except Exception as e:
