@@ -449,6 +449,149 @@ class CarController:
         except KeyboardInterrupt:
             print("\nHybrid control stopped")
 
+    def run_autonomous_test(self, start: Tuple[int, int], end: Tuple[int, int], 
+                           move_speed: int = 70, move_duration: float = 0.5, 
+                           turn_speed: int = 70, turn_duration: float = 0.3,
+                           step_delay: float = 0.2):
+        """
+        Run autonomous navigation test with fixed parameters.
+        
+        Args:
+            start: Starting position (row, col)
+            end: Target position (row, col)
+            move_speed: Speed for forward/backward movement (0-100)
+            move_duration: Duration for each movement step (seconds)
+            turn_speed: Speed for turning movements (0-100)
+            turn_duration: Duration for each turn step (seconds)
+            step_delay: Delay between steps (seconds)
+        """
+        print(f"=== Autonomous Test Mode ===")
+        print(f"Start: {start}, End: {end}")
+        print(f"Move Speed: {move_speed}, Move Duration: {move_duration}s")
+        print(f"Turn Speed: {turn_speed}, Turn Duration: {turn_duration}s")
+        print(f"Step Delay: {step_delay}s")
+        
+        if not self.grid:
+            print("Error: No grid loaded!")
+            return False
+        
+        # Calculate path
+        path = self.astar_pathfind(start, end)
+        if path is None:
+            print("No path found!")
+            return False
+        
+        directions = self.get_directions(path)
+        print(f"Path found with {len(directions)} steps: {directions}")
+        
+        # Execute path step by step
+        print("\nStarting autonomous navigation...")
+        for i, direction in enumerate(directions):
+            print(f"Step {i+1}/{len(directions)}: {direction}")
+            
+            # Execute movement with custom parameters
+            self.execute_test_direction(direction, move_speed, move_duration, 
+                                      turn_speed, turn_duration)
+            
+            # Wait between steps
+            if i < len(directions) - 1:  # Don't wait after last step
+                time.sleep(step_delay)
+        
+        print("Autonomous test completed!")
+        return True
+
+    def execute_test_direction(self, direction: str, move_speed: int, move_duration: float,
+                              turn_speed: int, turn_duration: float):
+        """
+        Execute a movement direction with configurable parameters for testing.
+        
+        Args:
+            direction: Movement direction ("UP", "DOWN", "LEFT", "RIGHT")
+            move_speed: Speed for forward/backward movement
+            move_duration: Duration for movement
+            turn_speed: Speed for turning
+            turn_duration: Duration for turning
+        """
+        if direction in ["UP", "DOWN"]:
+            # Forward/backward movement
+            if direction == "UP":
+                command = f"mctl {move_speed} {move_speed}"
+            else:  # DOWN
+                command = f"mctl -{move_speed} -{move_speed}"
+            
+            self.send_command(command)
+            time.sleep(move_duration)
+            self.send_command("mctl 0 0")
+            
+        elif direction in ["LEFT", "RIGHT"]:
+            # Turning movement
+            if direction == "LEFT":
+                command = f"mctl 0 {turn_speed}"
+            else:  # RIGHT
+                command = f"mctl {turn_speed} 0"
+            
+            self.send_command(command)
+            time.sleep(turn_duration)
+            self.send_command("mctl 0 0")
+        
+        else:
+            print(f"Unknown direction: {direction}")
+            self.send_command("mctl 0 0")
+
+def run_fixed_scenario():
+    """
+    Run a fixed test scenario with predefined parameters.
+    All connections are automatic, just runs the test.
+    """
+    # Fixed test parameters - modify these for your experiments
+    GRID_FILE = "floor2.csv"
+    START_POS = (12, 17)
+    END_POS = (18, 17)
+    
+    # Movement parameters for testing/configuration
+    MOVE_SPEED = 70        # Speed for forward/backward (0-100)
+    MOVE_DURATION = 0.5    # How long to move forward/backward (seconds)
+    TURN_SPEED = 70        # Speed for turning (0-100)
+    TURN_DURATION = 0.3    # How long to turn (seconds)
+    STEP_DELAY = 0.2       # Delay between movement steps (seconds)
+    
+    controller = CarController()
+    
+    try:
+        print("=== Fixed Scenario Test ===")
+        print("Setting up connections...")
+        
+        # Load grid
+        controller.load_grid(GRID_FILE)
+        print(f"Grid loaded from {GRID_FILE}")
+        
+        # Connect to car
+        controller.connect_serial()
+        print("Serial connection established")
+        
+        # Run autonomous test
+        success = controller.run_autonomous_test(
+            start=START_POS,
+            end=END_POS,
+            move_speed=MOVE_SPEED,
+            move_duration=MOVE_DURATION,
+            turn_speed=TURN_SPEED,
+            turn_duration=TURN_DURATION,
+            step_delay=STEP_DELAY
+        )
+        
+        if success:
+            print("Test scenario completed successfully!")
+        else:
+            print("Test scenario failed!")
+            
+    except Exception as e:
+        print(f"Error in test scenario: {e}")
+    finally:
+        if controller.serial_conn:
+            controller.serial_conn.close()
+            print("Serial connection closed")
+
 def main():
     """
     Main function - entry point for the car controller application.
@@ -461,10 +604,16 @@ def main():
         print("1. Manual control only")
         print("2. Hybrid control (manual + autonomous)")
         print("3. Load grid and start hybrid control")
+        print("4. Run fixed test scenario")
         
-        choice = input("Select mode (1-3): ").strip()
+        choice = input("Select mode (1-4): ").strip()
         
-        # Initialize hardware connections
+        if choice == "4":
+            # Run fixed scenario without further input
+            run_fixed_scenario()
+            return
+        
+        # Initialize hardware connections for other modes
         controller.connect_serial()
         controller.init_joystick()
         
