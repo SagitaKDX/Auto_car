@@ -1,200 +1,183 @@
-# Quick Setup Guide - File Transfer & Parameter Modification
-
-## 📁 File Transfer to Raspberry Pi
-
-### Method 1: Transfer Single File (floor2.csv)
-```bash
-# Replace <PI_IP> with your Raspberry Pi's IP address
-scp floor2.csv pi@<PI_IP>:/home/pi/Documents/Test/Autocar/Auto_car/
-
-# Example with actual IP:
-scp floor2.csv pi@192.168.1.100:/home/pi/Documents/Test/Autocar/Auto_car/
-```
-
-### Method 2: Transfer All Project Files
-```bash
-# Transfer entire project directory
-scp -r * pi@<PI_IP>:/home/pi/Documents/Test/Autocar/Auto_car/
-
-# Or transfer specific files
-scp movement.py example_usage.py floor2.csv pi@<PI_IP>:/home/pi/Documents/Test/Autocar/Auto_car/
-```
-
-### Method 3: Using rsync (Recommended for large files)
-```bash
-# Sync files efficiently
-rsync -av floor2.csv pi@<PI_IP>:/home/pi/Documents/Test/Autocar/Auto_car/
-
-# Sync entire directory
-rsync -av ./ pi@<PI_IP>:/home/pi/Documents/Test/Autocar/Auto_car/
-```
-
-### Find Your Raspberry Pi IP Address
-```bash
-# On Raspberry Pi, run:
-hostname -I
-
-# Or check from your router's admin panel
-# Or use network scanner: nmap -sn 192.168.1.0/24
-```
+để bạn hiểu và tự tính được từng pha trong đoạn chạy (tăng tốc, đều, phanh), mình tóm công thức “chuẩn vật lý” cho profile 3 pha (trapezoid) mà mình đã dùng trong code:
 
 ---
 
-## ⚙️ Modifying Constant Values
+## 1️⃣ Pha tăng tốc đều (0 → V)
 
-### 1. Edit Test Parameters in movement.py
+Giả thiết:
 
-Open `movement.py` and find the `run_fixed_scenario()` function (around line 520):
+- Gia tốc a = hằng
+- Bắt đầu đứng yên
+- Kết thúc tại vận tốc V trong thời gian (t_1)
 
-```python
-def run_fixed_scenario():
-    # ===== MODIFY THESE CONSTANTS =====
-    
-    # Grid and Position Settings
-    GRID_FILE = "floor2.csv"          # Path to your map file
-    START_POS = (12, 17)              # Starting position (row, col)
-    END_POS = (18, 17)                # Target position (row, col)
-    
-    # Movement Speed Settings (0-100)
-    MOVE_SPEED = 70                   # Forward/backward speed
-    TURN_SPEED = 70                   # Left/right turn speed
-    
-    # Timing Settings (seconds)
-    MOVE_DURATION = 0.5               # How long to move forward/back
-    TURN_DURATION = 0.3               # How long to turn left/right
-    STEP_DELAY = 0.2                  # Pause between each step
-```
+[
 
-### 2. Quick Parameter Reference
+V = a,t_1
 
-| Parameter | Typical Range | Description |
-|-----------|---------------|-------------|
-| `MOVE_SPEED` | 30-100 | Motor speed for forward/backward |
-| `TURN_SPEED` | 30-100 | Motor speed for turning |
-| `MOVE_DURATION` | 0.3-0.8s | Time to move one grid cell |
-| `TURN_DURATION` | 0.2-0.5s | Time for 90-degree turn |
-| `STEP_DELAY` | 0.1-0.5s | Pause between movements |
+]
 
-### 3. Position Settings
+Quãng đường pha tăng tốc:
 
-```python
-# Grid coordinates (row, col) - zero-indexed
-START_POS = (12, 17)    # Row 12, Column 17
-END_POS = (18, 17)      # Row 18, Column 17
+[
 
-# Make sure positions are:
-# - Not on walls (value = 0 in CSV)
-# - Within grid bounds
-# - Reachable path exists
-```
+s_1 = \tfrac12,a,t_1^2 = \tfrac12,V,t_1
 
-### 4. Common Modifications for Testing
-
-#### Slow and Careful (For initial testing):
-```python
-MOVE_SPEED = 50
-TURN_SPEED = 50
-MOVE_DURATION = 0.6
-TURN_DURATION = 0.4
-STEP_DELAY = 0.3
-```
-
-#### Fast Movement (After calibration):
-```python
-MOVE_SPEED = 85
-TURN_SPEED = 85
-MOVE_DURATION = 0.4
-TURN_DURATION = 0.25
-STEP_DELAY = 0.1
-```
-
-#### Test Adjacent Cells (Short distance):
-```python
-START_POS = (12, 17)
-END_POS = (12, 18)      # Just one cell to the right
-```
-
-#### Test Longer Path:
-```python
-START_POS = (12, 17)
-END_POS = (18, 20)      # Multiple turns required
-```
+]
 
 ---
 
-## 🔧 Quick Edit Commands
+## 2️⃣ Pha chạy đều (vận tốc = V)
 
-### Edit on Raspberry Pi via SSH:
-```bash
-# SSH into Pi
-ssh pi@<PI_IP>
+Giả thiết: chạy đều V trong thời gian (t_2)
 
-# Navigate to project
-cd /home/pi/Documents/Test/Autocar/Auto_car/
+[
 
-# Edit with nano
-nano movement.py
+s_2 = V,t_2
 
-# Or edit with vim
-vim movement.py
-```
-
-### Edit Locally and Transfer:
-```bash
-# Edit movement.py on your computer
-# Then transfer the updated file:
-scp movement.py pi@<PI_IP>:/home/pi/Documents/Test/Autocar/Auto_car/
-```
+]
 
 ---
 
-## 🚀 Test Your Changes
+## 3️⃣ Pha phanh đều (V → 0)
 
-### 1. Quick Test:
-```bash
-# On Raspberry Pi:
-cd /home/pi/Documents/Test/Autocar/Auto_car/
-python3 movement.py
-# Select option 4
-```
+Giả thiết:
 
-### 2. Parameter Testing:
-```bash
-# Use the testing script:
-python3 test_parameters.py
-# Select option 1 for connectivity test
-# Select option 2 for movement calibration
-```
+- Gia tốc phanh có độ lớn (a_b > 0)
+- Thời gian phanh (t_b = V / a_b)
+
+Quãng đường phanh:
+
+[
+
+s_b = \tfrac{V^2}{2,a_b}
+
+]
 
 ---
 
-## 📝 Example Complete Workflow
+## 4️⃣ Tổng quãng đường đoạn thẳng
 
-1. **Transfer file:**
-   ```bash
-   scp floor2.csv pi@192.168.1.100:/home/pi/Documents/Test/Autocar/Auto_car/
-   ```
+Tổng:
 
-2. **SSH and edit:**
-   ```bash
-   ssh pi@192.168.1.100
-   cd /home/pi/Documents/Test/Autocar/Auto_car/
-   nano movement.py
-   ```
+[
 
-3. **Modify these lines in the file:**
-   ```python
-   MOVE_SPEED = 60        # Change from 70 to 60
-   MOVE_DURATION = 0.6    # Change from 0.5 to 0.6
-   START_POS = (10, 15)   # Change start position
-   END_POS = (12, 15)     # Change end position
-   ```
+S = s_1 + s_2 + s_b = \tfrac12 a t_1^2 + V t_2 + \tfrac{V^2}{2 a_b}
 
-4. **Save and test:**
-   ```bash
-   # Save with Ctrl+X, Y, Enter
-   python3 movement.py
-   # Select option 4
-   ```
+]
 
-That's it! Your car will now use the new parameters. 
+Thay (a = V/t_1):
+
+[
+
+S = \tfrac12 V t_1 + V t_2 + \tfrac{V^2}{2 a_b}
+
+]
+
+→ từ đây có thể giải ra (t_2) nếu biết S, V, t₁, a_b:
+
+[
+
+\boxed{t_2 = \frac{S - \tfrac12 V t_1 - \tfrac{V^2}{2 a_b}}{V}}
+
+]
+
+---
+
+## 5️⃣ Trường hợp đoạn ngắn, không đạt V (tam giác)
+
+Nếu (S < s_1 + s_b) → xe không đủ chỗ đạt đến V trước khi phải phanh.
+
+Lúc đó ta tìm (V_{\max}) sao cho:
+
+[
+
+S = \frac{V_{\max}^2}{2 a} + \frac{V_{\max}^2}{2 a_b}
+
+= \frac{V_{\max}^2}{2}\left(\frac{1}{a} + \frac{1}{a_b}\right)
+
+]
+
+[
+
+\boxed{V_{\max} = \sqrt{\frac{2S}{\frac{1}{a}+\frac{1}{a_b}}}}
+
+]
+
+Khi đó:
+
+[
+
+t_{1,\text{eff}} = \frac{V_{\max}}{a},\qquad t_{b,\text{eff}} = \frac{V_{\max}}{a_b},\qquad t_2 = 0
+
+]
+
+---
+
+## 6️⃣ Ý nghĩa trong chương trình C
+
+- Dùng (t_1) **đo thực tế** (xe tăng tốc thật).
+- Tính (a = V/t_1).
+- Mỗi đoạn đường (S) (do Dijkstra tính ra = số ô × khoảng cách tâm-tâm (L)):
+    - Nếu (S ≥ s_1 + s_b) → có cruise:
+        - (t_2 = (S - s_1 - s_b)/V)
+    - Nếu (S < s_1 + s_b) → không đạt V:
+        - (V_{\max} = \sqrt{2S / (1/a + 1/a_b)})
+        - (t_1 = V_{\max}/a,; t_b = V_{\max}/a_b,; t_2=0)
+
+Sau đó mỗi đoạn được lập trình:
+
+```
+ACCEL t1
+CRUISE t2
+BRAKE tb
+
+```
+
+rồi quay hướng mới (`TURN LEFT/RIGHT`).
+
+---
+
+## 7️⃣ Khi đo thực tế
+
+- t₁ đo bằng thời gian xe tăng từ 0 đến tốc độ hành trình mong muốn V.
+- a_b (gia tốc phanh) đo bằng thời gian xe giảm từ V xuống 0 (tb = V/a_b).
+- Khoảng cách mỗi ô (EDGE_M) = khoảng cách tâm-tâm giữa 2 điểm grid thật.
+- Tổng S = số ô thẳng × EDGE_M (đoạn đó Dijkstra cho).
+
+---
+
+Tóm lại, ba công thức cốt lõi bạn cần nhớ:
+
+[
+
+\boxed{
+
+\begin{aligned}
+
+a &= \frac{V}{t_1} \
+
+s_1 &= \tfrac12,V,t_1 \
+
+s_b &= \frac{V^2}{2a_b} \
+
+t_2 &= \frac{S - s_1 - s_b}{V}
+
+\end{aligned}
+
+}
+
+]
+
+và nếu không đủ dài:
+
+[
+
+\boxed{
+
+V_{\max} = \sqrt{\frac{2S}{1/a + 1/a_b}}
+
+}
+
+]
+
+![image.png](attachment:90a06b63-9912-45c9-b77a-32958bb43b02:image.png)
